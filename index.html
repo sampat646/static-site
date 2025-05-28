@@ -6,7 +6,10 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>AR Filter Experience</title>
+    <title>AR Filter Experience with QR Scanning</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
     <style>
         * {
             margin: 0;
@@ -112,25 +115,36 @@
             box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
         }
 
-        /* Camera container */
-        #camera-container {
+        /* QR Scanning Screen */
+        #qr-scan-screen {
             position: fixed;
             top: 0;
             left: 0;
             width: 100vw;
             height: 100vh;
-            z-index: 1;
+            background: linear-gradient(135deg, #7f00ff 0%, #2a2a72 100%);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .qr-scan-text {
+            font-size: 24px;
+            font-weight: 300;
+            margin-bottom: 20px;
+            text-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        #qr-canvas {
             display: none;
         }
 
-        #camera-feed {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror effect */
-        }
-
-        /* Loading screen */
+        /* Loading Screen */
         #loading-screen {
             position: fixed;
             top: 0;
@@ -171,39 +185,7 @@
             text-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
         }
 
-        /* AR Overlay Video */
-        #ar-overlay {
-            position: fixed;
-            top: 10%;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 450px;
-            height: 320px;
-            z-index: 100;
-            border-radius: 30px;
-            overflow: hidden;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
-            opacity: 0;
-            transition: opacity 1.2s ease, transform 0.7s ease;
-            display: none;
-            background: transparent;
-        }
-
-        #ar-overlay.visible {
-            opacity: 0.95;
-            display: block;
-            transform: translateX(-50%) scale(1.08);
-        }
-
-        #overlay-video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            border-radius: 30px;
-            background: transparent;
-        }
-
-        /* Error screen */
+        /* Error Screen */
         #error-screen {
             position: fixed;
             top: 0;
@@ -247,19 +229,24 @@
             max-width: 360px;
         }
 
+        /* A-Frame Scene */
+        #ar-scene {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            display: none;
+        }
+
         /* Mobile optimizations */
         @media (max-width: 768px) {
-            #ar-overlay {
-                width: 95vw;
-                height: 240px;
-                top: 7%;
-            }
-            
             .permission-title {
                 font-size: 32px;
             }
             
-            .permission-subtitle {
+            .permission-subtitle, .qr-scan-text {
                 font-size: 20px;
             }
             
@@ -275,14 +262,21 @@
     <div id="permission-screen">
         <div class="camera-icon">📸</div>
         <div class="permission-title">Dive into AR</div>
-        <div class="permission-subtitle">Allow camera access to experience a stunning augmented reality ad</div>
+        <div class="permission-subtitle">Allow camera access to scan a QR code and experience augmented reality</div>
         <button id="allow-camera-btn" class="allow-button">Enable Camera</button>
+    </div>
+
+    <!-- QR Scanning Screen -->
+    <div id="qr-scan-screen">
+        <div class="camera-icon">🔍</div>
+        <div class="qr-scan-text">Scan the QR Code to Start AR</div>
+        <canvas id="qr-canvas"></canvas>
     </div>
 
     <!-- Loading Screen -->
     <div id="loading-screen">
         <div class="loading-spinner"></div>
-        <div class="loading-text">Loading AR Magic...</div>
+        <div class="loading-text">Loading AR Experience...</div>
     </div>
 
     <!-- Error Screen -->
@@ -294,21 +288,24 @@
         </div>
     </div>
 
-    <!-- Camera Container -->
-    <div id="camera-container">
-        <video id="camera-feed" autoplay muted playsinline></video>
-    </div>
-
-    <!-- AR Overlay Video -->
-    <div id="ar-overlay">
-        <video id="overlay-video" autoplay muted loop playsinline src="bg.mp4"></video>
-    </div>
+    <!-- A-Frame AR Scene -->
+    <a-scene id="ar-scene" vr-mode-ui="enabled: false" embedded arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false;">
+        <a-assets>
+            <video id="ad-video" autoplay muted loop playsinline crossorigin="anonymous" src="bg.mp4"></video>
+        </a-assets>
+        <a-marker preset="hiro">
+            <a-video src="#ad-video" width="1" height="0.71" position="0 0 0" rotation="0 0 0" material="transparent: true; opacity: 0.95"></a-video>
+        </a-marker>
+        <a-entity camera></a-entity>
+    </a-scene>
 
     <script>
         class ARFilterApp {
             constructor() {
                 this.camera = null;
                 this.stream = null;
+                this.qrCanvas = document.getElementById('qr-canvas');
+                this.qrContext = this.qrCanvas.getContext('2d');
                 this.init();
             }
 
@@ -349,9 +346,9 @@
             async requestCameraAccess() {
                 if (!this.checkHTTPS()) return;
 
-                // Hide permission screen and show loading
+                // Hide permission screen and show QR scanning
                 document.getElementById('permission-screen').style.display = 'none';
-                document.getElementById('loading-screen').style.display = 'flex';
+                document.getElementById('qr-scan-screen').style.display = 'flex';
 
                 try {
                     // Check if mediaDevices is supported
@@ -359,7 +356,7 @@
                         throw new Error('Camera API not supported');
                     }
 
-                    // Request camera with back camera preference
+                    // Request camera
                     const constraints = {
                         video: {
                             facingMode: { ideal: 'environment' }, // Back camera
@@ -370,29 +367,58 @@
                     };
 
                     this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    
-                    const cameraFeed = document.getElementById('camera-feed');
-                    cameraFeed.srcObject = this.stream;
-                    
-                    // Wait for video to be ready
-                    cameraFeed.onloadedmetadata = () => {
-                        // Hide loading screen and show camera
-                        document.getElementById('loading-screen').style.display = 'none';
-                        document.getElementById('camera-container').style.display = 'block';
-                        
-                        // Show AR overlay after a brief delay
-                        setTimeout(() => {
-                            document.getElementById('ar-overlay').classList.add('visible');
-                        }, 1000);
-                    };
+                    const video = document.createElement('video');
+                    video.srcObject = this.stream;
+                    video.play();
 
+                    // Set up QR scanning
+                    this.qrCanvas.width = 640;
+                    this.qrCanvas.height = 480;
+                    this.scanQRCode(video);
                 } catch (error) {
                     console.error('Camera access error:', error);
                     this.handleCameraError(error);
                 }
             }
 
+            scanQRCode(video) {
+                const scan = () => {
+                    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                        this.qrContext.drawImage(video, 0, 0, this.qrCanvas.width, this.qrCanvas.height);
+                        const imageData = this.qrContext.getImageData(0, 0, this.qrCanvas.width, this.qrCanvas.height);
+                        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                        if (code) {
+                            console.log('QR Code detected:', code.data);
+                            // Assume QR code contains marker info or proceed with default marker
+                            this.startAR();
+                            return;
+                        }
+                    }
+                    requestAnimationFrame(scan);
+                };
+                scan();
+            }
+
+            startAR() {
+                // Hide QR scan screen and show loading
+                document.getElementById('qr-scan-screen').style.display = 'none';
+                document.getElementById('loading-screen').style.display = 'flex';
+
+                // Stop the QR scanning stream
+                if (this.stream) {
+                    this.stream.getTracks().forEach(track => track.stop());
+                }
+
+                // Show A-Frame AR scene
+                setTimeout(() => {
+                    document.getElementById('loading-screen').style.display = 'none';
+                    document.getElementById('ar-scene').style.display = 'block';
+                }, 1000);
+            }
+
             handleCameraError(error) {
+                document.getElementById('qr-scan-screen').style.display = 'none';
                 document.getElementById('loading-screen').style.display = 'none';
                 
                 let errorTitle = 'Camera Access Required';
@@ -414,6 +440,7 @@
 
             showError(title, message) {
                 document.getElementById('permission-screen').style.display = 'none';
+                document.getElementById('qr-scan-screen').style.display = 'none';
                 document.getElementById('loading-screen').style.display = 'none';
                 document.getElementById('error-screen').querySelector('.error-title').textContent = title;
                 document.getElementById('error-screen').querySelector('.error-message').textContent = message;
